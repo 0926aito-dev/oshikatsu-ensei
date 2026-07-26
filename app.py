@@ -1,14 +1,25 @@
 import os
 import secrets
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from flask import Flask, abort, redirect, render_template, request, url_for
 from werkzeug.utils import secure_filename
 
+import places
+import youtube_client
+
 ALLOWED_PHOTO_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+
+QUICK_ADD_CHANNELS = [
+    ("@nogizakahaishinchu", "乃木坂配信中"),
+    ("@sakurazakachannel", "櫻坂チャンネル"),
+    ("@sakurazaka46SMEJ", "SME公式(櫻坂46)"),
+    ("@46officialyoutubechannel99", "乃木坂46公式"),
+    ("@hinatazakachannel", "日向坂チャンネル"),
+]
 
 
 def create_app(db_path=None, upload_folder=None):
@@ -22,6 +33,7 @@ def create_app(db_path=None, upload_folder=None):
 
     app.config["DB_PATH"] = db_path
     app.config["UPLOAD_FOLDER"] = upload_folder
+    app.config["YOUTUBE_API_KEY"] = os.environ.get("YOUTUBE_API_KEY")
 
     def get_db():
         conn = sqlite3.connect(app.config["DB_PATH"])
@@ -61,6 +73,46 @@ def create_app(db_path=None, upload_folder=None):
             )
             conn.execute(
                 "INSERT OR IGNORE INTO share_settings (id, enabled, token) VALUES (1, 0, NULL)"
+            )
+
+            ensure_column(conn, "trips", "lat", "REAL")
+            ensure_column(conn, "trips", "lng", "REAL")
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS watched_channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel_id TEXT NOT NULL UNIQUE,
+                    title TEXT NOT NULL
+                )
+                """
+            )
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scanned_videos (
+                    video_id TEXT PRIMARY KEY
+                )
+                """
+            )
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mentioned_places (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel_id TEXT,
+                    video_id TEXT NOT NULL,
+                    video_title TEXT NOT NULL,
+                    video_url TEXT NOT NULL,
+                    published_at TEXT,
+                    place_text TEXT NOT NULL,
+                    context TEXT,
+                    lat REAL NOT NULL,
+                    lng REAL NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(video_id, place_text)
+                )
+                """
             )
 
     def allowed_photo(filename):
@@ -259,6 +311,190 @@ def create_app(db_path=None, upload_folder=None):
             upcoming_total=sum(t["budget"] for t in upcoming),
             past_total=sum(t["budget"] for t in past),
         )
+
+    @app.route("/map")
+    def map_view():
+        with get_db() as conn:
+            trips = conn.execute("SELECT * FROM trips").fetchall()
+            _, past = split_trips(trips)
+
+            for trip in past:
+                if trip["lat"] is None or trip["lng"] is None:
+                    result = places.geocode(trip["place"])
+                    if result:
+                        lat, lng, _ = result
+                        conn.execute(
+                            "UPDATE trips SET lat = ?, lng = ? WHERE id = ?",
+                            (lat, lng, trip["id"]),
+                        )
+                        trip["lat"], trip["lng"] = lat, lng
+
+            mentioned = [
+                dict(row)
+                for row in conn.execute(
+                    "SELECT * FROM mentioned_places ORDER BY created_at DESC"
+                ).fetchall()
+            ]
+
+        visited_pins = [
+            {
+                "lat": trip["lat"],
+                "lng": trip["lng"],
+                "label": f"{trip['event_name']}({trip['date']} / {trip['place']})",
+                "url": url_for("edit_trip_form", trip_id=trip["id"]),
+            }
+            for trip in past
+            if trip["lat"] is not None and trip["lng"] is not None
+        ]
+
+        mentioned_pins = [
+            {
+                "lat": mention["lat"],
+                "lng": mention["lng"],
+                "label": f"{mention['place_text']}({mention['video_title']})",
+                "url": mention["video_url"],
+            }
+            for mention in mentioned
+        ]
+
+        return render_template(
+            "map.html", visited_pins=visited_pins, mentioned_pins=mentioned_pins
+        )
+
+    @app.route("/channels", methods=["GET"])
+    def channels_view():
+        with get_db() as conn:
+            channels = conn.execute(
+                "SELECT * FROM watched_channels ORDER BY title"
+            ).fetchall()
+        return render_template(
+            "channels.html",
+            channels=channels,
+            quick_add_channels=QUICK_ADD_CHANNELS,
+            youtube_api_key_configured=bool(app.config["YOUTUBE_API_KEY"]),
+            error=request.args.get("error"),
+        )
+
+    @app.route("/channels", methods=["POST"])
+    def add_channel():
+        api_key = app.config["YOUTUBE_API_KEY"]
+        if not api_key:
+            return redirect(url_for("channels_view", error="missing_api_key"))
+
+        identifier = request.form.get("identifier", "").strip()
+        if identifier:
+            resolved = youtube_client.resolve_channel(identifier, api_key)
+            if resolved:
+                with get_db() as conn:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO watched_channels (channel_id, title)
+                        VALUES (?, ?)
+                        """,
+                        (resolved["channel_id"], resolved["title"]),
+                    )
+        return redirect(url_for("channels_view"))
+
+    @app.route("/channels/<int:channel_row_id>/delete", methods=["POST"])
+    def delete_channel(channel_row_id):
+        with get_db() as conn:
+            conn.execute(
+                "DELETE FROM watched_channels WHERE id = ?", (channel_row_id,)
+            )
+        return redirect(url_for("channels_view"))
+
+    @app.route("/channels/check", methods=["POST"])
+    def check_channels():
+        api_key = app.config["YOUTUBE_API_KEY"]
+        if not api_key:
+            return redirect(url_for("channels_view", error="missing_api_key"))
+
+        added = 0
+        with get_db() as conn:
+            channels = conn.execute("SELECT * FROM watched_channels").fetchall()
+
+            for channel in channels:
+                videos = youtube_client.fetch_recent_videos(
+                    channel["channel_id"], api_key
+                )
+                for video in videos:
+                    already_scanned = conn.execute(
+                        "SELECT 1 FROM scanned_videos WHERE video_id = ?",
+                        (video["video_id"],),
+                    ).fetchone()
+                    if already_scanned:
+                        continue
+
+                    text = f"{video['title']}\n{video['description']}"
+                    for candidate in places.extract_place_candidates(text):
+                        result = places.geocode(candidate["place_text"])
+                        if not result:
+                            continue
+                        lat, lng, _ = result
+                        cursor = conn.execute(
+                            """
+                            INSERT OR IGNORE INTO mentioned_places
+                                (channel_id, video_id, video_title, video_url,
+                                 published_at, place_text, context, lat, lng,
+                                 created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                channel["channel_id"],
+                                video["video_id"],
+                                video["title"],
+                                video["url"],
+                                video["published_at"],
+                                candidate["place_text"],
+                                candidate["context"],
+                                lat,
+                                lng,
+                                datetime.now(timezone.utc).isoformat(),
+                            ),
+                        )
+                        if cursor.rowcount:
+                            added += 1
+
+                    conn.execute(
+                        "INSERT OR IGNORE INTO scanned_videos (video_id) VALUES (?)",
+                        (video["video_id"],),
+                    )
+
+        return redirect(url_for("mentions_view", added=added))
+
+    @app.route("/mentions")
+    def mentions_view():
+        with get_db() as conn:
+            mentioned = conn.execute(
+                "SELECT * FROM mentioned_places ORDER BY created_at DESC"
+            ).fetchall()
+        return render_template(
+            "mentions.html", mentioned=mentioned, added=request.args.get("added")
+        )
+
+    @app.route("/mentions/<int:mention_id>/edit", methods=["POST"])
+    def edit_mention(mention_id):
+        place_text = request.form.get("place_text", "").strip()
+        if place_text:
+            result = places.geocode(place_text)
+            if result:
+                lat, lng, _ = result
+                with get_db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE mentioned_places
+                        SET place_text = ?, lat = ?, lng = ?
+                        WHERE id = ?
+                        """,
+                        (place_text, lat, lng, mention_id),
+                    )
+        return redirect(url_for("mentions_view"))
+
+    @app.route("/mentions/<int:mention_id>/delete", methods=["POST"])
+    def delete_mention(mention_id):
+        with get_db() as conn:
+            conn.execute("DELETE FROM mentioned_places WHERE id = ?", (mention_id,))
+        return redirect(url_for("mentions_view"))
 
     init_db()
     return app

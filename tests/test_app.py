@@ -5,6 +5,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import places
+import youtube_client
 from app import create_app
 
 
@@ -160,3 +162,109 @@ def test_share_link_enable_view_and_disable(tmp_path):
 
     client.post("/share/disable")
     assert client.get(f"/share/{token}").status_code == 404
+
+
+def test_channels_check_adds_only_geocoded_places(tmp_path, monkeypatch):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "fake-key")
+    client = make_client(tmp_path)
+
+    monkeypatch.setattr(
+        youtube_client,
+        "resolve_channel",
+        lambda identifier, api_key, http_get=None: {
+            "channel_id": "UCabc123",
+            "title": "テストチャンネル",
+        },
+    )
+    client.post("/channels", data={"identifier": "@testchannel"})
+
+    monkeypatch.setattr(
+        youtube_client,
+        "fetch_recent_videos",
+        lambda channel_id, api_key, max_results=10, http_get=None: [
+            {
+                "video_id": "video1",
+                "title": "東京ライブ配信",
+                "description": "会場は東京です",
+                "published_at": "2026-07-01T00:00:00Z",
+                "url": "https://www.youtube.com/watch?v=video1",
+            },
+            {
+                "video_id": "video2",
+                "title": "なんでもない雑談",
+                "description": "特に場所の話はしていません",
+                "published_at": "2026-07-02T00:00:00Z",
+                "url": "https://www.youtube.com/watch?v=video2",
+            },
+        ],
+    )
+
+    def fake_geocode(place_text, http_get=None):
+        if place_text == "東京":
+            return (35.681236, 139.767125, "Tokyo")
+        return None
+
+    monkeypatch.setattr(places, "geocode", fake_geocode)
+
+    client.post("/channels/check")
+
+    mentions_page = client.get("/mentions").get_data(as_text=True)
+    assert "東京" in mentions_page
+    assert "東京ライブ配信" in mentions_page
+    assert "なんでもない雑談" not in mentions_page
+
+    map_page = client.get("/map").get_data(as_text=True)
+    assert "https://www.youtube.com/watch?v=video1" in map_page
+
+
+def test_mention_edit_regeocodes_and_delete_removes(tmp_path, monkeypatch):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "fake-key")
+    client = make_client(tmp_path)
+
+    monkeypatch.setattr(
+        youtube_client,
+        "resolve_channel",
+        lambda identifier, api_key, http_get=None: {
+            "channel_id": "UCabc123",
+            "title": "テストチャンネル",
+        },
+    )
+    client.post("/channels", data={"identifier": "@testchannel"})
+
+    monkeypatch.setattr(
+        youtube_client,
+        "fetch_recent_videos",
+        lambda channel_id, api_key, max_results=10, http_get=None: [
+            {
+                "video_id": "video1",
+                "title": "東京ライブ配信",
+                "description": "会場は東京です",
+                "published_at": "2026-07-01T00:00:00Z",
+                "url": "https://www.youtube.com/watch?v=video1",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        places,
+        "geocode",
+        lambda place_text, http_get=None: (35.681236, 139.767125, "Tokyo"),
+    )
+    client.post("/channels/check")
+
+    page = client.get("/mentions").get_data(as_text=True)
+    mention_id = page.split("/mentions/")[1].split("/")[0]
+
+    monkeypatch.setattr(
+        places,
+        "geocode",
+        lambda place_text, http_get=None: (34.6937, 135.5023, "Osaka"),
+    )
+    client.post(f"/mentions/{mention_id}/edit", data={"place_text": "大阪"})
+
+    page = client.get("/mentions").get_data(as_text=True)
+    assert "大阪" in page
+
+    client.post(f"/mentions/{mention_id}/delete")
+    page = client.get("/mentions").get_data(as_text=True)
+    assert "大阪" not in page
+    assert "まだ推しの場所は検出されていません" in page

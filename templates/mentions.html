@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block heading %}推しの場所{% endblock %}
+{% block content %}
+
+{% include "_nav.html" %}
+
+{% if added is not none %}
+  <div class="banner">{{ added }}件を新たに地図に追加しました</div>
+{% endif %}
+
+<div class="banner">
+  ここに出ているのは、YouTube動画のタイトル・概要欄から自動検出し、実在する地名として
+  地図上で確認できたものだけです。誤検知に気づいたら、地名を書き換えて更新するか、削除してください。
+</div>
+
+{% if mentioned %}
+  {% for m in mentioned %}
+    <div class="trip mention-card">
+      <div class="trip-header">
+        <div class="trip-info">
+          <span class="event">{{ m.place_text }}</span>
+        </div>
+      </div>
+      <div class="mention-source">
+        <a href="{{ m.video_url }}" target="_blank" rel="noopener">{{ m.video_title }}</a>
+        {% if m.context %}<div>{{ m.context }}</div>{% endif %}
+      </div>
+      <form class="mention-edit-form" action="{{ url_for('edit_mention', mention_id=m.id) }}" method="post">
+        <input type="text" name="place_text" value="{{ m.place_text }}" required>
+        <button type="submit" class="btn secondary">更新</button>
+      </form>
+      <form action="{{ url_for('delete_mention', mention_id=m.id) }}" method="post">
+        <button type="submit">削除</button>
+      </form>
+    </div>
+  {% endfor %}
+{% else %}
+  <div class="empty">まだ推しの場所は検出されていません</div>
+{% endif %}
+
+{% endblock %}

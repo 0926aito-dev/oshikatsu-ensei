@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block heading %}マップ{% endblock %}
+{% block content %}
+
+{% include "_nav.html" %}
+
+<div class="map-legend">
+  <span><span class="dot visited"></span>行った場所</span>
+  <span><span class="dot mentioned"></span>推しが言った場所</span>
+</div>
+
+<div id="map-canvas"></div>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const visitedPins = {{ visited_pins | tojson }};
+  const mentionedPins = {{ mentioned_pins | tojson }};
+
+  function makePopupContent(label, url, external) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.textContent = label;
+    if (external) {
+      link.target = "_blank";
+      link.rel = "noopener";
+    }
+    return link;
+  }
+
+  const map = L.map("map-canvas");
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  const allPoints = [];
+
+  visitedPins.forEach(function (pin) {
+    const marker = L.circleMarker([pin.lat, pin.lng], {
+      radius: 8,
+      color: "#ff6f91",
+      fillColor: "#ff6f91",
+      fillOpacity: 0.9
+    }).addTo(map);
+    marker.bindPopup(makePopupContent(pin.label, pin.url, false));
+    allPoints.push([pin.lat, pin.lng]);
+  });
+
+  mentionedPins.forEach(function (pin) {
+    const marker = L.circleMarker([pin.lat, pin.lng], {
+      radius: 8,
+      color: "#f5b400",
+      fillColor: "#f5b400",
+      fillOpacity: 0.9
+    }).addTo(map);
+    marker.bindPopup(makePopupContent(pin.label, pin.url, true));
+    allPoints.push([pin.lat, pin.lng]);
+  });
+
+  if (allPoints.length > 0) {
+    map.fitBounds(allPoints, { padding: [30, 30] });
+  } else {
+    map.setView([35.681236, 139.767125], 5);
+  }
+</script>
+
+{% endblock %}
