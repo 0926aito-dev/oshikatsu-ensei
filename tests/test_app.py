@@ -268,3 +268,40 @@ def test_mention_edit_regeocodes_and_delete_removes(tmp_path, monkeypatch):
     page = client.get("/mentions").get_data(as_text=True)
     assert "大阪" not in page
     assert "まだ推しの場所は検出されていません" in page
+
+
+def test_channels_check_without_token_configured_is_open(tmp_path, monkeypatch):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "fake-key")
+    monkeypatch.delenv("CHECK_TOKEN", raising=False)
+    client = make_client(tmp_path)
+
+    monkeypatch.setattr(
+        youtube_client, "fetch_recent_videos", lambda *a, **k: []
+    )
+
+    assert client.post("/channels/check").status_code == 302
+
+
+def test_channels_check_requires_matching_token_when_configured(tmp_path, monkeypatch):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "fake-key")
+    monkeypatch.setenv("CHECK_TOKEN", "secret123")
+    client = make_client(tmp_path)
+
+    monkeypatch.setattr(
+        youtube_client, "fetch_recent_videos", lambda *a, **k: []
+    )
+
+    assert client.post("/channels/check").status_code == 403
+    assert (
+        client.post(
+            "/channels/check", headers={"X-Check-Token": "wrong"}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/channels/check", headers={"X-Check-Token": "secret123"}
+        ).status_code
+        == 302
+    )
+    assert client.post("/channels/check?token=secret123").status_code == 302

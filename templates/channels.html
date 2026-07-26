@@ -48,8 +48,16 @@
 {% endif %}
 
 <form action="{{ url_for('check_channels') }}" method="post">
+  {% if check_token %}
+    <input type="hidden" name="token" value="{{ check_token }}">
+  {% endif %}
   <button type="submit">最新動画をチェックする</button>
 </form>
+{% if check_token %}
+  <p class="banner">
+    月1回の自動チェックはGitHub Actionsで設定できます(README参照)。
+  </p>
+{% endif %}
 
 <h2>公式サイト(手動確認用)</h2>
 <p class="banner">
