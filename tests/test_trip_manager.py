@@ -34,3 +34,9 @@ def test_total_budget_sums_all_trip_budgets():
     manager.add_trip("△△イベント", "2026-09-01", "大阪", 18000)
 
     assert manager.total_budget() == 43000
+
+
+def test_total_budget_is_zero_when_no_trips():
+    manager = TripManager()
+
+    assert manager.total_budget() == 0
