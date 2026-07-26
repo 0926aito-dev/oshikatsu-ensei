@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block heading %}チャンネル管理{% endblock %}
+{% block content %}
+
+{% include "_nav.html" %}
+
+{% if error == "missing_api_key" or not youtube_api_key_configured %}
+  <div class="banner">
+    YouTube連携を使うには環境変数 <code>YOUTUBE_API_KEY</code> の設定が必要です。
+    READMEの手順に沿ってGoogle CloudでYouTube Data API v3のキーを発行し、設定してください。
+  </div>
+{% endif %}
+
+<form class="panel" action="{{ url_for('add_channel') }}" method="post">
+  <label>チャンネルURL・ハンドル・チャンネルIDのいずれか
+    <input type="text" name="identifier" placeholder="例: https://www.youtube.com/@nogizakahaishinchu">
+  </label>
+  <button type="submit">追加する</button>
+</form>
+
+<h2>クイック追加</h2>
+<div class="quick-add-list">
+  {% for handle, name in quick_add_channels %}
+    <form action="{{ url_for('add_channel') }}" method="post">
+      <span>{{ name }}({{ handle }})</span>
+      <input type="hidden" name="identifier" value="{{ handle }}">
+      <button type="submit" class="btn secondary">追加</button>
+    </form>
+  {% endfor %}
+</div>
+
+<h2>監視中のチャンネル</h2>
+{% if channels %}
+  {% for channel in channels %}
+    <div class="trip">
+      <div class="trip-header">
+        <div class="trip-info"><span class="event">{{ channel.title }}</span></div>
+      </div>
+      <div class="trip-actions">
+        <form action="{{ url_for('delete_channel', channel_row_id=channel.id) }}" method="post">
+          <button type="submit">削除</button>
+        </form>
+      </div>
+    </div>
+  {% endfor %}
+{% else %}
+  <div class="empty">まだチャンネルが登録されていません</div>
+{% endif %}
+
+<form action="{{ url_for('check_channels') }}" method="post">
+  <button type="submit">最新動画をチェックする</button>
+</form>
+
+<h2>公式サイト(手動確認用)</h2>
+<p class="banner">
+  ファンクラブや公式サイトのニュースは自動取得していません。以下のリンクから直接確認してください。
+</p>
+<div class="card quick-links">
+  <a href="https://www.nogizaka46.com/s/n46/news/list" target="_blank" rel="noopener">乃木坂46 公式サイト ニュース一覧</a>
+  <a href="https://sakurazaka46.com/s/s46/news/list" target="_blank" rel="noopener">櫻坂46 公式サイト ニュース一覧</a>
+  <a href="https://www.hinatazaka46.com/s/official/news/list" target="_blank" rel="noopener">日向坂46 公式サイト ニュース一覧</a>
+</div>
+
+{% endblock %}
