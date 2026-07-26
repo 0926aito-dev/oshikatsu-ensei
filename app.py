@@ -1,6 +1,7 @@
 import os
 import secrets
 import sqlite3
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -20,6 +21,14 @@ QUICK_ADD_CHANNELS = [
     ("@46officialyoutubechannel99", "乃木坂46公式"),
     ("@hinatazakachannel", "日向坂チャンネル"),
 ]
+
+# Regular (e.g. monthly, scheduled) checks only look at the most recent
+# videos. A "full" check (typically run once, right after adding a channel)
+# looks back further. This is capped rather than truly unlimited: scanning
+# a channel's entire history could burn through the YouTube API's daily
+# quota and take long enough to hit Render's request timeout.
+DEFAULT_CHECK_VIDEO_LIMIT = 10
+FULL_CHECK_VIDEO_LIMIT = 200
 
 
 def create_app(db_path=None, upload_folder=None):
@@ -409,9 +418,9 @@ def create_app(db_path=None, upload_folder=None):
     def check_channels():
         expected_token = app.config["CHECK_TOKEN"]
         if expected_token:
-            provided_token = request.headers.get("X-Check-Token") or request.args.get(
-                "token"
-            )
+            provided_token = request.headers.get(
+                "X-Check-Token"
+            ) or request.values.get("token")
             if provided_token != expected_token:
                 abort(403)
 
@@ -419,13 +428,25 @@ def create_app(db_path=None, upload_folder=None):
         if not api_key:
             return redirect(url_for("channels_view", error="missing_api_key"))
 
+        full = request.values.get("full") == "1"
+        max_results = FULL_CHECK_VIDEO_LIMIT if full else DEFAULT_CHECK_VIDEO_LIMIT
+
         added = 0
         with get_db() as conn:
+            # Reuse coordinates already found for a place_text (this run or a
+            # past one) instead of asking Nominatim again for the same string.
+            geocode_cache = {
+                row["place_text"]: (row["lat"], row["lng"])
+                for row in conn.execute(
+                    "SELECT DISTINCT place_text, lat, lng FROM mentioned_places"
+                )
+            }
+
             channels = conn.execute("SELECT * FROM watched_channels").fetchall()
 
             for channel in channels:
                 videos = youtube_client.fetch_recent_videos(
-                    channel["channel_id"], api_key
+                    channel["channel_id"], api_key, max_results=max_results
                 )
                 for video in videos:
                     already_scanned = conn.execute(
@@ -437,10 +458,25 @@ def create_app(db_path=None, upload_folder=None):
 
                     text = f"{video['title']}\n{video['description']}"
                     for candidate in places.extract_place_candidates(text):
-                        result = places.geocode(candidate["place_text"])
-                        if not result:
+                        place_text = candidate["place_text"]
+                        if place_text in geocode_cache:
+                            cached = geocode_cache[place_text]
+                            lat, lng = cached if cached else (None, None)
+                        else:
+                            result = places.geocode(place_text)
+                            # Respect Nominatim's fair-use rate limit
+                            # (roughly one request per second).
+                            time.sleep(1)
+                            if result:
+                                lat, lng, _ = result
+                                geocode_cache[place_text] = (lat, lng)
+                            else:
+                                lat = lng = None
+                                geocode_cache[place_text] = None
+
+                        if lat is None or lng is None:
                             continue
-                        lat, lng, _ = result
+
                         cursor = conn.execute(
                             """
                             INSERT OR IGNORE INTO mentioned_places
@@ -455,7 +491,7 @@ def create_app(db_path=None, upload_folder=None):
                                 video["title"],
                                 video["url"],
                                 video["published_at"],
-                                candidate["place_text"],
+                                place_text,
                                 candidate["context"],
                                 lat,
                                 lng,

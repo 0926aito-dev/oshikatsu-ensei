@@ -51,7 +51,15 @@
   {% if check_token %}
     <input type="hidden" name="token" value="{{ check_token }}">
   {% endif %}
-  <button type="submit">最新動画をチェックする</button>
+  <button type="submit">最新動画をチェックする(直近10件)</button>
+</form>
+
+<form action="{{ url_for('check_channels') }}" method="post">
+  {% if check_token %}
+    <input type="hidden" name="token" value="{{ check_token }}">
+  {% endif %}
+  <input type="hidden" name="full" value="1">
+  <button type="submit" class="btn secondary">初回まとめて取得する(最大200件・時間がかかります)</button>
 </form>
 {% if check_token %}
   <p class="banner">
