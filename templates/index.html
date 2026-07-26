@@ -1,116 +1,112 @@
-<!doctype html>
-<html lang="ja">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>推し活遠征管理</title>
-  <style>
-    :root { color-scheme: light dark; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
-      max-width: 480px;
-      margin: 0 auto;
-      padding: 16px;
-      background: #fafafa;
-      color: #222;
-    }
-    h1 { font-size: 1.4rem; }
-    form.trip-form {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      background: white;
-      padding: 16px;
-      border-radius: 12px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.1);
-      margin-bottom: 20px;
-    }
-    label { font-size: 0.85rem; color: #555; }
-    input {
-      padding: 10px;
-      font-size: 1rem;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      width: 100%;
-      box-sizing: border-box;
-    }
-    button {
-      padding: 12px;
-      font-size: 1rem;
-      border: none;
-      border-radius: 8px;
-      background: #ff6f91;
-      color: white;
-      font-weight: bold;
-    }
-    .trip {
-      background: white;
-      border-radius: 12px;
-      padding: 12px 16px;
-      margin-bottom: 10px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-    }
-    .trip-info { font-size: 0.95rem; }
-    .trip-info .event { font-weight: bold; display: block; }
-    .trip-budget { font-weight: bold; color: #ff6f91; display: block; text-align: right; }
-    .delete-btn {
-      background: none;
-      border: none;
-      color: #999;
-      font-size: 0.8rem;
-      padding: 4px 0;
-    }
-    .total {
-      text-align: right;
-      font-size: 1.1rem;
-      font-weight: bold;
-      margin-bottom: 16px;
-    }
-    .empty { color: #999; text-align: center; padding: 20px 0; }
-  </style>
-</head>
-<body>
-  <h1>推し活遠征管理</h1>
+{% extends "base.html" %}
+{% block content %}
 
-  <form class="trip-form" action="{{ url_for('add_trip') }}" method="post">
-    <label>イベント名
-      <input type="text" name="event_name" required>
-    </label>
-    <label>日付
-      <input type="date" name="date" required>
-    </label>
-    <label>場所
-      <input type="text" name="place" required>
-    </label>
-    <label>予算(円)
-      <input type="number" name="budget" min="0" required>
-    </label>
-    <button type="submit">追加する</button>
-  </form>
-
-  <div class="total">合計予算: {{ "{:,}".format(total) }}円</div>
-
-  {% if trips %}
-    {% for trip in trips %}
-      <div class="trip">
-        <div class="trip-info">
-          <span class="event">{{ trip['event_name'] }}</span>
-          {{ trip['date'] }} / {{ trip['place'] }}
-        </div>
-        <div>
-          <span class="trip-budget">{{ "{:,}".format(trip['budget']) }}円</span>
-          <form action="{{ url_for('delete_trip', trip_id=trip['id']) }}" method="post">
-            <button type="submit" class="delete-btn">削除</button>
-          </form>
-        </div>
-      </div>
-    {% endfor %}
+<div class="card share-panel">
+  {% if share_enabled %}
+    <p>共有リンクが有効です。このURLを知っている人は閲覧専用ページを見られます。</p>
+    <div class="share-url">{{ share_url }}</div>
+    <div class="share-actions">
+      <form action="{{ url_for('share_regenerate') }}" method="post">
+        <button type="submit" class="btn secondary">リンクを再発行</button>
+      </form>
+      <form action="{{ url_for('share_disable') }}" method="post">
+        <button type="submit" class="btn secondary">共有を無効にする</button>
+      </form>
+    </div>
   {% else %}
-    <div class="empty">まだ遠征の予定がありません</div>
+    <p>共有リンクを発行すると、ログインなしで閲覧専用ページを見てもらえます。</p>
+    <form action="{{ url_for('share_enable') }}" method="post">
+      <button type="submit" class="btn">共有リンクを発行する</button>
+    </form>
   {% endif %}
-</body>
-</html>
+</div>
+
+<form class="panel" action="{{ url_for('add_trip') }}" method="post" enctype="multipart/form-data">
+  <label>イベント名
+    <input type="text" name="event_name" required>
+  </label>
+  <label>日付
+    <input type="date" name="date" required>
+  </label>
+  <label>場所
+    <input type="text" name="place" required>
+  </label>
+  <label>予算(円)
+    <input type="number" name="budget" min="0" required>
+  </label>
+  <label>推し活のルート(任意)
+    <textarea name="route" placeholder="例: 会場入り→物販→開演→本編→物販"></textarea>
+  </label>
+  <label>感想メモ(任意)
+    <textarea name="memo" placeholder="行った後の感想はここに"></textarea>
+  </label>
+  <label>写真(任意)
+    <input type="file" name="photo" accept="image/*">
+  </label>
+  <button type="submit">追加する</button>
+</form>
+
+<h2>これから</h2>
+<div class="total">予定合計: {{ "{:,}".format(upcoming_total) }}円</div>
+{% if upcoming %}
+  {% for trip in upcoming %}
+    <div class="trip">
+      <div class="trip-header">
+        <div class="trip-info">
+          <span class="event">{{ trip.event_name }}</span>
+          {{ trip.date }} / {{ trip.place }}
+          <div class="days-left">
+            {% if trip.days_left == 0 %}今日です!{% else %}あと{{ trip.days_left }}日{% endif %}
+          </div>
+        </div>
+        <span class="trip-budget">{{ "{:,}".format(trip.budget) }}円</span>
+      </div>
+      {% if trip.route %}
+        <div class="trip-route"><span class="label">ルート</span>{{ trip.route }}</div>
+      {% endif %}
+      <div class="trip-actions">
+        <a href="{{ url_for('edit_trip_form', trip_id=trip.id) }}">編集</a>
+        <form action="{{ url_for('delete_trip', trip_id=trip.id) }}" method="post">
+          <button type="submit">削除</button>
+        </form>
+      </div>
+    </div>
+  {% endfor %}
+{% else %}
+  <div class="empty">これからの予定はまだありません</div>
+{% endif %}
+
+<h2>これまで</h2>
+<div class="total">記録合計: {{ "{:,}".format(past_total) }}円</div>
+{% if past %}
+  {% for trip in past %}
+    <div class="trip">
+      <div class="trip-header">
+        <div class="trip-info">
+          <span class="event">{{ trip.event_name }}</span>
+          {{ trip.date }} / {{ trip.place }}
+        </div>
+        <span class="trip-budget">{{ "{:,}".format(trip.budget) }}円</span>
+      </div>
+      {% if trip.photo_filename %}
+        <img class="trip-photo" src="{{ url_for('static', filename='uploads/' ~ trip.photo_filename) }}" alt="{{ trip.event_name }}">
+      {% endif %}
+      {% if trip.route %}
+        <div class="trip-route"><span class="label">ルート</span>{{ trip.route }}</div>
+      {% endif %}
+      {% if trip.memo %}
+        <div class="trip-memo"><span class="label">感想メモ</span>{{ trip.memo }}</div>
+      {% endif %}
+      <div class="trip-actions">
+        <a href="{{ url_for('edit_trip_form', trip_id=trip.id) }}">編集</a>
+        <form action="{{ url_for('delete_trip', trip_id=trip.id) }}" method="post">
+          <button type="submit">削除</button>
+        </form>
+      </div>
+    </div>
+  {% endfor %}
+{% else %}
+  <div class="empty">まだ記録がありません</div>
+{% endif %}
+
+{% endblock %}

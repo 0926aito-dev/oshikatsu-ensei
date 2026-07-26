@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block heading %}推し活の記録・予定{% endblock %}
+{% block content %}
+
+<div class="banner">これは共有された閲覧専用ページです。</div>
+
+<h2>これから</h2>
+<div class="total">予定合計: {{ "{:,}".format(upcoming_total) }}円</div>
+{% if upcoming %}
+  {% for trip in upcoming %}
+    <div class="trip">
+      <div class="trip-header">
+        <div class="trip-info">
+          <span class="event">{{ trip.event_name }}</span>
+          {{ trip.date }} / {{ trip.place }}
+          <div class="days-left">
+            {% if trip.days_left == 0 %}今日です!{% else %}あと{{ trip.days_left }}日{% endif %}
+          </div>
+        </div>
+        <span class="trip-budget">{{ "{:,}".format(trip.budget) }}円</span>
+      </div>
+      {% if trip.route %}
+        <div class="trip-route"><span class="label">ルート</span>{{ trip.route }}</div>
+      {% endif %}
+    </div>
+  {% endfor %}
+{% else %}
+  <div class="empty">これからの予定はまだありません</div>
+{% endif %}
+
+<h2>これまで</h2>
+<div class="total">記録合計: {{ "{:,}".format(past_total) }}円</div>
+{% if past %}
+  {% for trip in past %}
+    <div class="trip">
+      <div class="trip-header">
+        <div class="trip-info">
+          <span class="event">{{ trip.event_name }}</span>
+          {{ trip.date }} / {{ trip.place }}
+        </div>
+        <span class="trip-budget">{{ "{:,}".format(trip.budget) }}円</span>
+      </div>
+      {% if trip.photo_filename %}
+        <img class="trip-photo" src="{{ url_for('static', filename='uploads/' ~ trip.photo_filename) }}" alt="{{ trip.event_name }}">
+      {% endif %}
+      {% if trip.route %}
+        <div class="trip-route"><span class="label">ルート</span>{{ trip.route }}</div>
+      {% endif %}
+      {% if trip.memo %}
+        <div class="trip-memo"><span class="label">感想メモ</span>{{ trip.memo }}</div>
+      {% endif %}
+    </div>
+  {% endfor %}
+{% else %}
+  <div class="empty">まだ記録がありません</div>
+{% endif %}
+
+{% endblock %}

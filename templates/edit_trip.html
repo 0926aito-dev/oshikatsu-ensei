@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block heading %}記録を編集{% endblock %}
+{% block content %}
+
+<form class="panel" action="{{ url_for('edit_trip', trip_id=trip.id) }}" method="post" enctype="multipart/form-data">
+  <label>イベント名
+    <input type="text" name="event_name" value="{{ trip.event_name }}" required>
+  </label>
+  <label>日付
+    <input type="date" name="date" value="{{ trip.date }}" required>
+  </label>
+  <label>場所
+    <input type="text" name="place" value="{{ trip.place }}" required>
+  </label>
+  <label>予算(円)
+    <input type="number" name="budget" min="0" value="{{ trip.budget }}" required>
+  </label>
+  <label>推し活のルート(任意)
+    <textarea name="route">{{ trip.route or "" }}</textarea>
+  </label>
+  <label>感想メモ(任意)
+    <textarea name="memo">{{ trip.memo or "" }}</textarea>
+  </label>
+
+  {% if trip.photo_filename %}
+    <div class="photo-preview-block">
+      <span class="label" style="font-size:0.75rem;color:#999;display:block;">現在の写真</span>
+      <img class="trip-photo" src="{{ url_for('static', filename='uploads/' ~ trip.photo_filename) }}" alt="">
+    </div>
+    <label class="checkbox-label">
+      <input type="checkbox" name="remove_photo" value="1">
+      この写真を削除する
+    </label>
+  {% endif %}
+
+  <label>写真を{% if trip.photo_filename %}差し替える{% else %}追加する{% endif %}(任意)
+    <input type="file" name="photo" accept="image/*">
+  </label>
+
+  <button type="submit">更新する</button>
+</form>
+
+<a class="btn secondary" href="{{ url_for('index') }}">キャンセルして戻る</a>
+
+{% endblock %}
