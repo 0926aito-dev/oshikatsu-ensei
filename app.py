@@ -34,6 +34,7 @@ def create_app(db_path=None, upload_folder=None):
     app.config["DB_PATH"] = db_path
     app.config["UPLOAD_FOLDER"] = upload_folder
     app.config["YOUTUBE_API_KEY"] = os.environ.get("YOUTUBE_API_KEY")
+    app.config["CHECK_TOKEN"] = os.environ.get("CHECK_TOKEN")
 
     def get_db():
         conn = sqlite3.connect(app.config["DB_PATH"])
@@ -372,6 +373,7 @@ def create_app(db_path=None, upload_folder=None):
             channels=channels,
             quick_add_channels=QUICK_ADD_CHANNELS,
             youtube_api_key_configured=bool(app.config["YOUTUBE_API_KEY"]),
+            check_token=app.config["CHECK_TOKEN"],
             error=request.args.get("error"),
         )
 
@@ -405,6 +407,14 @@ def create_app(db_path=None, upload_folder=None):
 
     @app.route("/channels/check", methods=["POST"])
     def check_channels():
+        expected_token = app.config["CHECK_TOKEN"]
+        if expected_token:
+            provided_token = request.headers.get("X-Check-Token") or request.args.get(
+                "token"
+            )
+            if provided_token != expected_token:
+                abort(403)
+
         api_key = app.config["YOUTUBE_API_KEY"]
         if not api_key:
             return redirect(url_for("channels_view", error="missing_api_key"))

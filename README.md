@@ -48,6 +48,24 @@ YouTube Data API v3 のAPIキーが必要です。
 地名の判定には [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org/) の無料ジオコーディングを利用しています。
 地図のタイル・ジオコーディングともにAPIキーは不要です。
 
+### 月1回の自動チェック
+
+`/channels/check` を毎月1回自動で呼び出すGitHub Actionsワークフロー(`.github/workflows/monthly-channel-check.yml`)を
+用意しています。無料で動作し、Renderの有料プランは不要です(スケジュール実行のタイミングはGitHub側の混雑状況により
+多少前後することがあります)。
+
+`/channels/check` は認証なしだと誰でも呼び出せてしまい、YouTube APIのクォータを消費されてしまうため、
+環境変数 `CHECK_TOKEN` を設定すると、一致するトークンを持つリクエストだけを受け付けるようになります
+(未設定の場合はこれまで通り誰でも呼び出せます)。
+
+自動チェックを有効にする場合:
+
+1. Renderのサービス環境変数に `CHECK_TOKEN` を設定する(値はGitHub Secretsの `CHECK_TOKEN` と同じものにする)
+2. GitHubリポジトリの Secrets に同じ値で `CHECK_TOKEN` を登録する(`gh secret set CHECK_TOKEN` など)
+3. `/channels` 画面の「最新動画をチェックする」ボタンは、`CHECK_TOKEN` が設定されていれば自動的にトークンを付けて送信するので、手動チェックも引き続き使えます
+
+GitHub Actionsの画面から「Run workflow」を選べば、月初を待たずに手動実行することもできます。
+
 ## Renderへのデプロイ
 
 このリポジトリには `render.yaml` を用意しているので、Renderの「New +」→「Blueprint」から

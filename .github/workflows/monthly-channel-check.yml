@@ -1,0 +1,19 @@
+name: Monthly channel check
+
+on:
+  schedule:
+    - cron: "0 3 1 * *"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger /channels/check
+        env:
+          CHECK_TOKEN: ${{ secrets.CHECK_TOKEN }}
+        run: |
+          curl -sf --max-time 120 --retry 3 --retry-delay 20 \
+            -X POST \
+            -H "X-Check-Token: ${CHECK_TOKEN}" \
+            https://oshikatsu-ensei.onrender.com/channels/check
