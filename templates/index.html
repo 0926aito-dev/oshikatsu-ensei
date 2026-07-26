@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>推し活遠征管理</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 16px;
+      background: #fafafa;
+      color: #222;
+    }
+    h1 { font-size: 1.4rem; }
+    form.trip-form {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: white;
+      padding: 16px;
+      border-radius: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    label { font-size: 0.85rem; color: #555; }
+    input {
+      padding: 10px;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    button {
+      padding: 12px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 8px;
+      background: #ff6f91;
+      color: white;
+      font-weight: bold;
+    }
+    .trip {
+      background: white;
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-bottom: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .trip-info { font-size: 0.95rem; }
+    .trip-info .event { font-weight: bold; display: block; }
+    .trip-budget { font-weight: bold; color: #ff6f91; display: block; text-align: right; }
+    .delete-btn {
+      background: none;
+      border: none;
+      color: #999;
+      font-size: 0.8rem;
+      padding: 4px 0;
+    }
+    .total {
+      text-align: right;
+      font-size: 1.1rem;
+      font-weight: bold;
+      margin-bottom: 16px;
+    }
+    .empty { color: #999; text-align: center; padding: 20px 0; }
+  </style>
+</head>
+<body>
+  <h1>推し活遠征管理</h1>
+
+  <form class="trip-form" action="{{ url_for('add_trip') }}" method="post">
+    <label>イベント名
+      <input type="text" name="event_name" required>
+    </label>
+    <label>日付
+      <input type="date" name="date" required>
+    </label>
+    <label>場所
+      <input type="text" name="place" required>
+    </label>
+    <label>予算(円)
+      <input type="number" name="budget" min="0" required>
+    </label>
+    <button type="submit">追加する</button>
+  </form>
+
+  <div class="total">合計予算: {{ "{:,}".format(total) }}円</div>
+
+  {% if trips %}
+    {% for trip in trips %}
+      <div class="trip">
+        <div class="trip-info">
+          <span class="event">{{ trip['event_name'] }}</span>
+          {{ trip['date'] }} / {{ trip['place'] }}
+        </div>
+        <div>
+          <span class="trip-budget">{{ "{:,}".format(trip['budget']) }}円</span>
+          <form action="{{ url_for('delete_trip', trip_id=trip['id']) }}" method="post">
+            <button type="submit" class="delete-btn">削除</button>
+          </form>
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty">まだ遠征の予定がありません</div>
+  {% endif %}
+</body>
+</html>
