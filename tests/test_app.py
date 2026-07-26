@@ -1,5 +1,6 @@
 import io
 import sys
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -166,6 +167,7 @@ def test_share_link_enable_view_and_disable(tmp_path):
 
 def test_channels_check_adds_only_geocoded_places(tmp_path, monkeypatch):
     monkeypatch.setenv("YOUTUBE_API_KEY", "fake-key")
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
     client = make_client(tmp_path)
 
     monkeypatch.setattr(
@@ -219,6 +221,7 @@ def test_channels_check_adds_only_geocoded_places(tmp_path, monkeypatch):
 
 def test_mention_edit_regeocodes_and_delete_removes(tmp_path, monkeypatch):
     monkeypatch.setenv("YOUTUBE_API_KEY", "fake-key")
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
     client = make_client(tmp_path)
 
     monkeypatch.setattr(
@@ -305,3 +308,81 @@ def test_channels_check_requires_matching_token_when_configured(tmp_path, monkey
         == 302
     )
     assert client.post("/channels/check?token=secret123").status_code == 302
+
+
+def test_channels_check_full_mode_requests_more_videos(tmp_path, monkeypatch):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "fake-key")
+    client = make_client(tmp_path)
+
+    monkeypatch.setattr(
+        youtube_client,
+        "resolve_channel",
+        lambda identifier, api_key, http_get=None: {
+            "channel_id": "UCabc123",
+            "title": "テストチャンネル",
+        },
+    )
+    client.post("/channels", data={"identifier": "@testchannel"})
+
+    captured = {}
+
+    def fake_fetch_recent_videos(channel_id, api_key, max_results=10, http_get=None):
+        captured["max_results"] = max_results
+        return []
+
+    monkeypatch.setattr(youtube_client, "fetch_recent_videos", fake_fetch_recent_videos)
+
+    client.post("/channels/check")
+    assert captured["max_results"] == 10
+
+    client.post("/channels/check", data={"full": "1"})
+    assert captured["max_results"] == 200
+
+
+def test_channels_check_reuses_geocode_for_repeated_place_text(tmp_path, monkeypatch):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "fake-key")
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    client = make_client(tmp_path)
+
+    monkeypatch.setattr(
+        youtube_client,
+        "resolve_channel",
+        lambda identifier, api_key, http_get=None: {
+            "channel_id": "UCabc123",
+            "title": "テストチャンネル",
+        },
+    )
+    client.post("/channels", data={"identifier": "@testchannel"})
+
+    monkeypatch.setattr(
+        youtube_client,
+        "fetch_recent_videos",
+        lambda channel_id, api_key, max_results=10, http_get=None: [
+            {
+                "video_id": "video1",
+                "title": "東京ライブ配信1",
+                "description": "会場は東京です",
+                "published_at": "2026-07-01T00:00:00Z",
+                "url": "https://www.youtube.com/watch?v=video1",
+            },
+            {
+                "video_id": "video2",
+                "title": "東京ライブ配信2",
+                "description": "また東京でやります",
+                "published_at": "2026-07-02T00:00:00Z",
+                "url": "https://www.youtube.com/watch?v=video2",
+            },
+        ],
+    )
+
+    geocode_calls = []
+
+    def fake_geocode(place_text, http_get=None):
+        geocode_calls.append(place_text)
+        return (35.681236, 139.767125, "Tokyo")
+
+    monkeypatch.setattr(places, "geocode", fake_geocode)
+
+    client.post("/channels/check")
+
+    assert geocode_calls == ["東京"]
