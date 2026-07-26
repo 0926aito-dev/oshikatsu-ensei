@@ -34,9 +34,22 @@
   {% for channel in channels %}
     <div class="trip">
       <div class="trip-header">
-        <div class="trip-info"><span class="event">{{ channel.title }}</span></div>
+        <div class="trip-info">
+          <span class="event">
+            <span class="dot" style="background: {{ channel_colors.get(channel.channel_id, '#999') }};"></span>
+            {{ channel.title }}
+          </span>
+        </div>
       </div>
       <div class="trip-actions">
+        <form action="{{ url_for('check_channels') }}" method="post">
+          {% if check_token %}
+            <input type="hidden" name="token" value="{{ check_token }}">
+          {% endif %}
+          <input type="hidden" name="channel_row_id" value="{{ channel.id }}">
+          <input type="hidden" name="full" value="1">
+          <button type="submit">まとめて取得(最大200件)</button>
+        </form>
         <form action="{{ url_for('delete_channel', channel_row_id=channel.id) }}" method="post">
           <button type="submit">削除</button>
         </form>
@@ -51,21 +64,17 @@
   {% if check_token %}
     <input type="hidden" name="token" value="{{ check_token }}">
   {% endif %}
-  <button type="submit">最新動画をチェックする(直近10件)</button>
-</form>
-
-<form action="{{ url_for('check_channels') }}" method="post">
-  {% if check_token %}
-    <input type="hidden" name="token" value="{{ check_token }}">
-  {% endif %}
-  <input type="hidden" name="full" value="1">
-  <button type="submit" class="btn secondary">初回まとめて取得する(最大200件・時間がかかります)</button>
+  <button type="submit">全チャンネルの最新動画をチェックする(各10件)</button>
 </form>
 {% if check_token %}
   <p class="banner">
     月1回の自動チェックはGitHub Actionsで設定できます(README参照)。
   </p>
 {% endif %}
+<p class="banner">
+  「まとめて取得」は時間がかかるため、チャンネルを追加した直後などに1件ずつ実行してください
+  (全チャンネルをまとめて「まとめて取得」することはできません)。
+</p>
 
 <h2>公式サイト(手動確認用)</h2>
 <p class="banner">

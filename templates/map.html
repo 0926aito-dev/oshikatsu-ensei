@@ -6,7 +6,9 @@
 
 <div class="map-legend">
   <span><span class="dot visited"></span>行った場所</span>
-  <span><span class="dot mentioned"></span>推しが言った場所</span>
+  {% for entry in channel_legend %}
+    <span><span class="dot" style="background: {{ entry.color }};"></span>{{ entry.title }}</span>
+  {% endfor %}
 </div>
 
 <div id="map-canvas"></div>
@@ -49,10 +51,11 @@
   });
 
   mentionedPins.forEach(function (pin) {
+    const color = pin.color || "#f5b400";
     const marker = L.circleMarker([pin.lat, pin.lng], {
       radius: 8,
-      color: "#f5b400",
-      fillColor: "#f5b400",
+      color: color,
+      fillColor: color,
       fillOpacity: 0.9
     }).addTo(map);
     marker.bindPopup(makePopupContent(pin.label, pin.url, true));
