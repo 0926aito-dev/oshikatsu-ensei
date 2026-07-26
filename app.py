@@ -14,6 +14,8 @@ import youtube_client
 
 ALLOWED_PHOTO_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 
+MENTION_COLORS = ["#4f9dde", "#7d5fff", "#2ecc71", "#f5b400", "#ff8c42", "#e0507a"]
+
 QUICK_ADD_CHANNELS = [
     ("@nogizakahaishinchu", "乃木坂配信中"),
     ("@sakurazakachannel", "櫻坂チャンネル"),
@@ -164,6 +166,18 @@ def create_app(db_path=None, upload_folder=None):
 
     def get_share_settings(conn):
         return conn.execute("SELECT * FROM share_settings WHERE id = 1").fetchone()
+
+    def get_channel_colors(conn):
+        """Assign each watched channel a stable, distinct color (by id order)
+        so map pins and the channel list can show at a glance which group a
+        place or channel belongs to."""
+        rows = conn.execute(
+            "SELECT channel_id FROM watched_channels ORDER BY id"
+        ).fetchall()
+        return {
+            row["channel_id"]: MENTION_COLORS[i % len(MENTION_COLORS)]
+            for i, row in enumerate(rows)
+        }
 
     @app.route("/")
     def index():
@@ -346,6 +360,12 @@ def create_app(db_path=None, upload_folder=None):
                 ).fetchall()
             ]
 
+            channel_colors = get_channel_colors(conn)
+            channel_titles = {
+                row["channel_id"]: row["title"]
+                for row in conn.execute("SELECT channel_id, title FROM watched_channels")
+            }
+
         visited_pins = [
             {
                 "lat": trip["lat"],
@@ -357,18 +377,32 @@ def create_app(db_path=None, upload_folder=None):
             if trip["lat"] is not None and trip["lng"] is not None
         ]
 
+        default_color = MENTION_COLORS[0]
         mentioned_pins = [
             {
                 "lat": mention["lat"],
                 "lng": mention["lng"],
-                "label": f"{mention['place_text']}({mention['video_title']})",
+                "label": "{}・{}({})".format(
+                    mention["place_text"],
+                    channel_titles.get(mention["channel_id"], "不明なチャンネル"),
+                    mention["video_title"],
+                ),
                 "url": mention["video_url"],
+                "color": channel_colors.get(mention["channel_id"], default_color),
             }
             for mention in mentioned
         ]
 
+        channel_legend = [
+            {"title": title, "color": channel_colors.get(channel_id, default_color)}
+            for channel_id, title in channel_titles.items()
+        ]
+
         return render_template(
-            "map.html", visited_pins=visited_pins, mentioned_pins=mentioned_pins
+            "map.html",
+            visited_pins=visited_pins,
+            mentioned_pins=mentioned_pins,
+            channel_legend=channel_legend,
         )
 
     @app.route("/channels", methods=["GET"])
@@ -377,9 +411,11 @@ def create_app(db_path=None, upload_folder=None):
             channels = conn.execute(
                 "SELECT * FROM watched_channels ORDER BY title"
             ).fetchall()
+            channel_colors = get_channel_colors(conn)
         return render_template(
             "channels.html",
             channels=channels,
+            channel_colors=channel_colors,
             quick_add_channels=QUICK_ADD_CHANNELS,
             youtube_api_key_configured=bool(app.config["YOUTUBE_API_KEY"]),
             check_token=app.config["CHECK_TOKEN"],
@@ -428,7 +464,13 @@ def create_app(db_path=None, upload_folder=None):
         if not api_key:
             return redirect(url_for("channels_view", error="missing_api_key"))
 
-        full = request.values.get("full") == "1"
+        channel_row_id = request.values.get("channel_row_id", type=int)
+        # "full" backfills a lot more history than the regular check, which
+        # is slow (YouTube API paging + a rate-limited geocode per unique
+        # place). Doing that for every watched channel in one request risks
+        # exceeding the server's request timeout, so full mode is only
+        # allowed when scoped to a single channel; otherwise it's ignored.
+        full = request.values.get("full") == "1" and channel_row_id is not None
         max_results = FULL_CHECK_VIDEO_LIMIT if full else DEFAULT_CHECK_VIDEO_LIMIT
 
         added = 0
@@ -442,7 +484,12 @@ def create_app(db_path=None, upload_folder=None):
                 )
             }
 
-            channels = conn.execute("SELECT * FROM watched_channels").fetchall()
+            if channel_row_id is not None:
+                channels = conn.execute(
+                    "SELECT * FROM watched_channels WHERE id = ?", (channel_row_id,)
+                ).fetchall()
+            else:
+                channels = conn.execute("SELECT * FROM watched_channels").fetchall()
 
             for channel in channels:
                 videos = youtube_client.fetch_recent_videos(

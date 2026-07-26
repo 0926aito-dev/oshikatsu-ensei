@@ -1,4 +1,5 @@
 import io
+import json
 import sys
 import time
 from datetime import date, timedelta
@@ -335,7 +336,17 @@ def test_channels_check_full_mode_requests_more_videos(tmp_path, monkeypatch):
     client.post("/channels/check")
     assert captured["max_results"] == 10
 
+    # full=1 without a specific channel is ignored (avoids one request trying
+    # to fully backfill every watched channel and risking a timeout).
     client.post("/channels/check", data={"full": "1"})
+    assert captured["max_results"] == 10
+
+    channels_page = client.get("/channels").get_data(as_text=True)
+    channel_row_id = channels_page.split('name="channel_row_id" value="')[1].split('"')[0]
+
+    client.post(
+        "/channels/check", data={"full": "1", "channel_row_id": channel_row_id}
+    )
     assert captured["max_results"] == 200
 
 
@@ -386,3 +397,62 @@ def test_channels_check_reuses_geocode_for_repeated_place_text(tmp_path, monkeyp
     client.post("/channels/check")
 
     assert geocode_calls == ["東京"]
+
+
+def test_map_assigns_distinct_colors_per_channel(tmp_path, monkeypatch):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "fake-key")
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    client = make_client(tmp_path)
+
+    channel_infos = {
+        "@channelA": {"channel_id": "UCaaaa", "title": "チャンネルA"},
+        "@channelB": {"channel_id": "UCbbbb", "title": "チャンネルB"},
+    }
+    monkeypatch.setattr(
+        youtube_client,
+        "resolve_channel",
+        lambda identifier, api_key, http_get=None: channel_infos[identifier],
+    )
+    client.post("/channels", data={"identifier": "@channelA"})
+    client.post("/channels", data={"identifier": "@channelB"})
+
+    def fake_fetch_recent_videos(channel_id, api_key, max_results=10, http_get=None):
+        if channel_id == "UCaaaa":
+            return [
+                {
+                    "video_id": "videoA",
+                    "title": "東京ライブ",
+                    "description": "東京で開催",
+                    "published_at": "2026-07-01T00:00:00Z",
+                    "url": "https://www.youtube.com/watch?v=videoA",
+                }
+            ]
+        return [
+            {
+                "video_id": "videoB",
+                "title": "大阪ライブ",
+                "description": "大阪で開催",
+                "published_at": "2026-07-01T00:00:00Z",
+                "url": "https://www.youtube.com/watch?v=videoB",
+            }
+        ]
+
+    monkeypatch.setattr(youtube_client, "fetch_recent_videos", fake_fetch_recent_videos)
+
+    def fake_geocode(place_text, http_get=None):
+        if place_text == "東京":
+            return (35.681236, 139.767125, "Tokyo")
+        if place_text == "大阪":
+            return (34.6937, 135.5023, "Osaka")
+        return None
+
+    monkeypatch.setattr(places, "geocode", fake_geocode)
+
+    client.post("/channels/check")
+
+    map_page = client.get("/map").get_data(as_text=True)
+    mentioned_pins = json.loads(map_page.split("mentionedPins = ")[1].split(";")[0])
+
+    colors = {pin["color"] for pin in mentioned_pins}
+    assert len(mentioned_pins) == 2
+    assert len(colors) == 2
