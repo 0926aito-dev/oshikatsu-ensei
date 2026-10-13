@@ -18,6 +18,20 @@
   <button type="submit">追加する</button>
 </form>
 
+{% if error == "invalid_video_url" %}
+  <div class="banner">動画URLを読み取れませんでした。YouTube動画のURL(例: https://youtu.be/xxxxxxxxxxx)を貼り付けてください。</div>
+{% elif error == "video_not_found" %}
+  <div class="banner">動画が見つかりませんでした。非公開・削除済みの動画でないか確認してください。</div>
+{% endif %}
+
+<h2>動画URLから場所を探す</h2>
+<form class="panel" action="{{ url_for('check_video') }}" method="post">
+  <label>YouTube動画のURL(共有リンク・ショート・ライブも可)
+    <input type="text" name="video_url" placeholder="例: https://youtu.be/IaszQaGHi5w" required>
+  </label>
+  <button type="submit">この動画をチェックする</button>
+</form>
+
 <h2>クイック追加</h2>
 <div class="quick-add-list">
   {% for handle, name in quick_add_channels %}

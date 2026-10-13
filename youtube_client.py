@@ -5,6 +5,12 @@ import requests
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 _CHANNEL_ID_PATTERN = re.compile(r"^UC[\w-]{22}$")
+_VIDEO_ID_PATTERN = re.compile(r"^[\w-]{11}$")
+_VIDEO_URL_PATTERNS = [
+    re.compile(r"youtu\.be/([\w-]{11})"),
+    re.compile(r"youtube\.com/(?:shorts|live|embed)/([\w-]{11})"),
+    re.compile(r"youtube\.com/watch\?(?:[^#]*&)?v=([\w-]{11})"),
+]
 
 
 def parse_handle(identifier):
@@ -81,3 +87,41 @@ def fetch_recent_videos(channel_id, api_key, max_results=10, http_get=requests.g
             break
 
     return videos
+
+
+def parse_video_id(identifier):
+    """Extract an 11-character video ID from a YouTube video URL or bare ID.
+
+    Handles youtu.be short links (including share links with ?si=...),
+    watch?v=, /shorts/, /live/ and /embed/ URLs. Returns None otherwise.
+    """
+    identifier = identifier.strip()
+    for pattern in _VIDEO_URL_PATTERNS:
+        match = pattern.search(identifier)
+        if match:
+            return match.group(1)
+    if _VIDEO_ID_PATTERN.match(identifier):
+        return identifier
+    return None
+
+
+def fetch_video(video_id, api_key, http_get=requests.get):
+    response = http_get(
+        f"{YOUTUBE_API_BASE}/videos",
+        params={"part": "snippet", "id": video_id, "key": api_key},
+        timeout=10,
+    )
+    response.raise_for_status()
+    items = response.json().get("items", [])
+    if not items:
+        return None
+
+    snippet = items[0]["snippet"]
+    return {
+        "video_id": video_id,
+        "channel_id": snippet.get("channelId"),
+        "title": snippet.get("title", ""),
+        "description": snippet.get("description", ""),
+        "published_at": snippet.get("publishedAt", ""),
+        "url": f"https://www.youtube.com/watch?v={video_id}",
+    }

@@ -144,3 +144,55 @@ def test_fetch_recent_videos_paginates_past_50_per_page():
     assert calls[0]["maxResults"] == 50
     assert "pageToken" not in calls[0]
     assert calls[1]["pageToken"] == "page2"
+
+
+def test_parse_video_id_from_various_urls():
+    for url in [
+        "https://youtu.be/IaszQaGHi5w?si=JyLwhDtHNkZ1h1dr",
+        "https://www.youtube.com/watch?v=IaszQaGHi5w",
+        "https://www.youtube.com/watch?feature=share&v=IaszQaGHi5w&t=10",
+        "https://m.youtube.com/shorts/IaszQaGHi5w",
+        "https://www.youtube.com/live/IaszQaGHi5w?si=abc",
+        "IaszQaGHi5w",
+    ]:
+        assert youtube_client.parse_video_id(url) == "IaszQaGHi5w", url
+
+
+def test_parse_video_id_rejects_non_video_urls():
+    assert youtube_client.parse_video_id("https://www.youtube.com/@nogizakahaishinchu") is None
+    assert youtube_client.parse_video_id("") is None
+
+
+def test_fetch_video_returns_video_info():
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "items": [
+                    {
+                        "snippet": {
+                            "channelId": "UCabc123",
+                            "title": "大阪ロケ",
+                            "description": "大阪城ホールに行きました",
+                            "publishedAt": "2026-10-01T00:00:00Z",
+                        }
+                    }
+                ]
+            }
+
+    def fake_http_get(url, params=None, timeout=None):
+        assert url.endswith("/videos")
+        assert params["id"] == "IaszQaGHi5w"
+        return FakeResponse()
+
+    video = youtube_client.fetch_video("IaszQaGHi5w", "fake-key", http_get=fake_http_get)
+    assert video == {
+        "video_id": "IaszQaGHi5w",
+        "channel_id": "UCabc123",
+        "title": "大阪ロケ",
+        "description": "大阪城ホールに行きました",
+        "published_at": "2026-10-01T00:00:00Z",
+        "url": "https://www.youtube.com/watch?v=IaszQaGHi5w",
+    }

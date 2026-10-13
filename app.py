@@ -179,6 +179,68 @@ def create_app(db_path=None, upload_folder=None):
             for i, row in enumerate(rows)
         }
 
+    def load_geocode_cache(conn):
+        # Reuse coordinates already found for a place_text (this run or a
+        # past one) instead of asking Nominatim again for the same string.
+        return {
+            row["place_text"]: (row["lat"], row["lng"])
+            for row in conn.execute(
+                "SELECT DISTINCT place_text, lat, lng FROM mentioned_places"
+            )
+        }
+
+    def scan_video(conn, video, channel_id, geocode_cache):
+        """Detect places in a video's title/description and store geocoded ones.
+
+        Returns how many new mentioned_places rows were added.
+        """
+        added = 0
+        text = f"{video['title']}\n{video['description']}"
+        for candidate in places.extract_place_candidates(text):
+            place_text = candidate["place_text"]
+            if place_text in geocode_cache:
+                cached = geocode_cache[place_text]
+                lat, lng = cached if cached else (None, None)
+            else:
+                result = places.geocode(place_text)
+                # Respect Nominatim's fair-use rate limit
+                # (roughly one request per second).
+                time.sleep(1)
+                if result:
+                    lat, lng, _ = result
+                    geocode_cache[place_text] = (lat, lng)
+                else:
+                    lat = lng = None
+                    geocode_cache[place_text] = None
+
+            if lat is None or lng is None:
+                continue
+
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO mentioned_places
+                    (channel_id, video_id, video_title, video_url,
+                     published_at, place_text, context, lat, lng,
+                     created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    channel_id,
+                    video["video_id"],
+                    video["title"],
+                    video["url"],
+                    video["published_at"],
+                    place_text,
+                    candidate["context"],
+                    lat,
+                    lng,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            if cursor.rowcount:
+                added += 1
+        return added
+
     @app.route("/")
     def index():
         with get_db() as conn:
@@ -475,14 +537,7 @@ def create_app(db_path=None, upload_folder=None):
 
         added = 0
         with get_db() as conn:
-            # Reuse coordinates already found for a place_text (this run or a
-            # past one) instead of asking Nominatim again for the same string.
-            geocode_cache = {
-                row["place_text"]: (row["lat"], row["lng"])
-                for row in conn.execute(
-                    "SELECT DISTINCT place_text, lat, lng FROM mentioned_places"
-                )
-            }
+            geocode_cache = load_geocode_cache(conn)
 
             if channel_row_id is not None:
                 channels = conn.execute(
@@ -503,55 +558,41 @@ def create_app(db_path=None, upload_folder=None):
                     if already_scanned:
                         continue
 
-                    text = f"{video['title']}\n{video['description']}"
-                    for candidate in places.extract_place_candidates(text):
-                        place_text = candidate["place_text"]
-                        if place_text in geocode_cache:
-                            cached = geocode_cache[place_text]
-                            lat, lng = cached if cached else (None, None)
-                        else:
-                            result = places.geocode(place_text)
-                            # Respect Nominatim's fair-use rate limit
-                            # (roughly one request per second).
-                            time.sleep(1)
-                            if result:
-                                lat, lng, _ = result
-                                geocode_cache[place_text] = (lat, lng)
-                            else:
-                                lat = lng = None
-                                geocode_cache[place_text] = None
-
-                        if lat is None or lng is None:
-                            continue
-
-                        cursor = conn.execute(
-                            """
-                            INSERT OR IGNORE INTO mentioned_places
-                                (channel_id, video_id, video_title, video_url,
-                                 published_at, place_text, context, lat, lng,
-                                 created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """,
-                            (
-                                channel["channel_id"],
-                                video["video_id"],
-                                video["title"],
-                                video["url"],
-                                video["published_at"],
-                                place_text,
-                                candidate["context"],
-                                lat,
-                                lng,
-                                datetime.now(timezone.utc).isoformat(),
-                            ),
-                        )
-                        if cursor.rowcount:
-                            added += 1
+                    added += scan_video(
+                        conn, video, channel["channel_id"], geocode_cache
+                    )
 
                     conn.execute(
                         "INSERT OR IGNORE INTO scanned_videos (video_id) VALUES (?)",
                         (video["video_id"],),
                     )
+
+        return redirect(url_for("mentions_view", added=added))
+
+    @app.route("/videos/check", methods=["POST"])
+    def check_video():
+        api_key = app.config["YOUTUBE_API_KEY"]
+        if not api_key:
+            return redirect(url_for("channels_view", error="missing_api_key"))
+
+        video_id = youtube_client.parse_video_id(request.form.get("video_url", ""))
+        if not video_id:
+            return redirect(url_for("channels_view", error="invalid_video_url"))
+
+        video = youtube_client.fetch_video(video_id, api_key)
+        if not video:
+            return redirect(url_for("channels_view", error="video_not_found"))
+
+        # Unlike the channel check, a video the user pasted in explicitly is
+        # always re-scanned, even if a channel check already looked at it.
+        with get_db() as conn:
+            added = scan_video(
+                conn, video, video["channel_id"], load_geocode_cache(conn)
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO scanned_videos (video_id) VALUES (?)",
+                (video_id,),
+            )
 
         return redirect(url_for("mentions_view", added=added))
 

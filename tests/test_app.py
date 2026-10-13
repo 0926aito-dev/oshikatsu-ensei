@@ -456,3 +456,49 @@ def test_map_assigns_distinct_colors_per_channel(tmp_path, monkeypatch):
     colors = {pin["color"] for pin in mentioned_pins}
     assert len(mentioned_pins) == 2
     assert len(colors) == 2
+
+
+def test_video_check_adds_places_from_pasted_url(tmp_path, monkeypatch):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "fake-key")
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    client = make_client(tmp_path)
+
+    def fake_fetch_video(video_id, api_key, http_get=None):
+        assert video_id == "IaszQaGHi5w"
+        return {
+            "video_id": video_id,
+            "channel_id": "UCother",
+            "title": "福岡ロケ",
+            "description": "福岡で食べ歩き",
+            "published_at": "2026-10-01T00:00:00Z",
+            "url": f"https://www.youtube.com/watch?v={video_id}",
+        }
+
+    monkeypatch.setattr(youtube_client, "fetch_video", fake_fetch_video)
+    monkeypatch.setattr(
+        places,
+        "geocode",
+        lambda place_text, http_get=None: (33.59, 130.40, "Fukuoka")
+        if place_text == "福岡"
+        else None,
+    )
+
+    response = client.post(
+        "/videos/check",
+        data={"video_url": "https://youtu.be/IaszQaGHi5w?si=JyLwhDtHNkZ1h1dr"},
+    )
+    assert "added=1" in response.headers["Location"]
+
+    mentions_page = client.get("/mentions").get_data(as_text=True)
+    assert "福岡ロケ" in mentions_page
+
+    map_page = client.get("/map").get_data(as_text=True)
+    assert "https://www.youtube.com/watch?v=IaszQaGHi5w" in map_page
+
+
+def test_video_check_rejects_invalid_url(tmp_path, monkeypatch):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "fake-key")
+    client = make_client(tmp_path)
+
+    response = client.post("/videos/check", data={"video_url": "not a video"})
+    assert "error=invalid_video_url" in response.headers["Location"]
